@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.7
 FROM python:3.11-slim AS base
 
+# --- Env ---
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -9,33 +10,51 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     OMP_NUM_THREADS=1 \
     MKL_NUM_THREADS=1
 
-# --- instalare pachete de bază ---
+# --- System deps ---
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends build-essential git curl ca-certificates cmake && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        git \
+        curl \
+        ca-certificates \
+        cmake \
+        zstd \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# --- instalare requirements ---
+# --- Python deps ---
 COPY requirements.txt .
-RUN pip install --upgrade pip && pip install -r requirements.txt
+RUN pip install --upgrade pip && \
+    pip install -r requirements.txt
 
-# --- copiere cod aplicație ---
+# --- App files ---
 COPY index.html /index.html
 COPY app /app/app
 
-# --- copiere baza Chroma preconstruită (opțional, dar recomandat) ---
+# --- Baza Chroma „baked-in” (opțional, recomandat pt. startup rapid) ---
+# Asigură-te că ai acest folder în repo:
 COPY app/chroma_db_bge_m3 /app/chroma_db_bge_m3
 
-# --- pre-încălzire modele Hugging Face ---
-RUN python - <<'PY'
-from sentence_transformers import SentenceTransformer, CrossEncoder
-SentenceTransformer("BAAI/bge-m3")
-CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
-print("✅ Modelele au fost pre-încărcate cu succes.")
-PY
+# --- Pre-warm modele (fără heredoc) ---
+# Variante stabilă 1: prin sentence-transformers
+RUN python -c "from sentence_transformers import SentenceTransformer, CrossEncoder; \
+SentenceTransformer('BAAI/bge-m3'); \
+CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2'); \
+print('OK: models cached')"
 
-# --- configurare implicită ---
+# (alternativă stabilă 2: direct din huggingface_hub; las-o comentată)
+# RUN python -c "from huggingface_hub import snapshot_download; \
+# snapshot_download('BAAI/bge-m3'); \
+# snapshot_download('cross-encoder/ms-marco-MiniLM-L-6-v2'); \
+# print('OK: snapshots cached')"
+
+# --- Cleanup cache (reduce imaginea) ---
+RUN rm -rf /root/.cache/pip \
+    && rm -rf /root/.cache/torch/* \
+    && rm -rf /tmp/*
+
+# --- Defaults runtime ---
 ENV PORT=8080 \
     HOST=0.0.0.0 \
     CHROMA_PATH=app/chroma_db_bge_m3 \
@@ -44,5 +63,5 @@ ENV PORT=8080 \
     MAX_WORDS=100 \
     GEN_MODEL=gpt-4o-mini
 
-# --- comandă lansare server ---
+# --- Start server ---
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1", "--proxy-headers", "--forwarded-allow-ips=*"]
