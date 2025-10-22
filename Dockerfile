@@ -29,7 +29,7 @@ RUN pip install --upgrade pip && \
     pip install -r requirements.txt
 
 # Copiază aplicația și UI
-COPY index.html /index.html
+COPY index.html /app/index.html
 COPY app /app/app
 
 # Copiază baza Chroma baked-in (folderul trebuie să existe în repo)
@@ -57,3 +57,4 @@ ENV PORT=8080 \
 
 # Start server (exec form; bun pentru Cloud Run, SSE ok)
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1", "--proxy-headers", "--forwarded-allow-ips=*"]
+
