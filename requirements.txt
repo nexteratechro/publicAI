@@ -1,26 +1,20 @@
-# --- server ---
 fastapi==0.115.0
 uvicorn[standard]==0.32.0
 orjson==3.10.10
 uvloop==0.20.0
 
-# --- OpenAI client ---
 openai==1.54.3
 
-# --- RAG / vector DB ---
 chromadb==0.5.14
 hnswlib==0.8.0
 pydantic==2.9.2
 
-# --- NLP / embeddings ---
 sentence-transformers==3.2.1
 transformers==4.46.3
 tokenizers==0.20.3
 huggingface-hub==0.26.2
 
-# --- Torch CPU (≥2.6) ---
 torch==2.6.0
 numpy==1.26.4
 
-# --- optional utilities ---
 tqdm==4.66.6
