@@ -9,32 +9,33 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     OMP_NUM_THREADS=1 \
     MKL_NUM_THREADS=1
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential git curl ca-certificates cmake \
- && rm -rf /var/lib/apt/lists/*
+# --- instalare pachete de bază ---
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential git curl ca-certificates cmake && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# 1) deps separate pt caching
+# --- instalare requirements ---
 COPY requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
-# 2) codul + UI
+# --- copiere cod aplicație ---
 COPY index.html /index.html
 COPY app /app/app
 
-# 3) Baza Chroma preconstruită (baked-in) – copiaz-o în repo înainte de build
+# --- copiere baza Chroma preconstruită (opțional, dar recomandat) ---
 COPY app/chroma_db_bge_m3 /app/chroma_db_bge_m3
 
-# 4) Pre-warm modele la build (bge-m3 + cross-encoder)
+# --- pre-încălzire modele Hugging Face ---
 RUN python - <<'PY'
 from sentence_transformers import SentenceTransformer, CrossEncoder
 SentenceTransformer("BAAI/bge-m3")
 CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
-print("OK: models cached")
+print("✅ Modelele au fost pre-încărcate cu succes.")
 PY
 
-# 5) defaults
+# --- configurare implicită ---
 ENV PORT=8080 \
     HOST=0.0.0.0 \
     CHROMA_PATH=app/chroma_db_bge_m3 \
@@ -43,5 +44,5 @@ ENV PORT=8080 \
     MAX_WORDS=100 \
     GEN_MODEL=gpt-4o-mini
 
-# 6) server – SSE friendly
-CMD exec uvicorn app.main:app --host ${HOST} --port ${PORT} --workers 1 --proxy-headers --forwarded-allow-ips="*"
+# --- comandă lansare server ---
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1", "--proxy-headers", "--forwarded-allow-ips=*"]
