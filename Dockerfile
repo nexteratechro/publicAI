@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 FROM python:3.11-slim AS base
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -46,4 +45,5 @@ ENV PORT=8080 \
 
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1", "--proxy-headers", "--forwarded-allow-ips=*"]
+
 
