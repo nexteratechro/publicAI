@@ -40,10 +40,11 @@ ENV PORT=8080 \
     TOP_K=4 \
     DISTANCE_MAX=1.2 \
     MAX_WORDS=100 \
-    GEN_MODEL=gpt-4o-mini # Poate fi înlocuit cu un model Gemini Vertex AI
+    GEN_MODEL=gpt-4o-mini 
 
 
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1", "--proxy-headers", "--forwarded-allow-ips=*"]
+
 
 
