@@ -57,7 +57,6 @@ COPY app/chroma_db_bge_m3 /app/chroma_db_bge_m3
 
 # ----------------------------------------------------
 # --- FIȘIERE APLICAȚIE (STRAT CU SCHIMBĂRI FRECVENTE) ---
-# Acestea se invalidează la fiecare schimbare de cod. Lăsate la final.
 # ----------------------------------------------------
 COPY index.html /app/index.html
 COPY app /app/app
@@ -77,4 +76,5 @@ ENV PORT=8080 \
 # ----------------------------------------------------
 # --- START SERVER ---
 # ----------------------------------------------------
+
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1", "--proxy-headers", "--forwarded-allow-ips=*"]
