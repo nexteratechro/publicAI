@@ -1,13 +1,13 @@
 # app/main.py
 import os, re, json, urllib.parse, time, threading
 from typing import List, Dict, Any, Optional
+from collections import deque
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, validator
 
-import redis
 from openai import OpenAI
 
 import chromadb
@@ -24,12 +24,11 @@ INDEX_PATH = os.path.join(ROOT_DIR, "index.html")
 
 CHROMA_PATH    = os.getenv("CHROMA_PATH", "app/chroma_db_bge_m3")
 COLLECTION     = os.getenv("COLLECTION_NAME")
-REDIS_URL      = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 MODEL_NAME     = os.getenv("GEN_MODEL", "gpt-4o-mini")
-TOP_K          = int(os.getenv("TOP_K", "4"))
+TOP_K          = int(os.getenv("TOP_K", "6"))
 DISTANCE_MAX   = float(os.getenv("DISTANCE_MAX", "1.2"))
-MAX_WORDS      = int(os.getenv("MAX_WORDS", "100"))
+MAX_WORDS      = int(os.getenv("MAX_WORDS", "120"))
 
 NO_ANS = "Nu am găsit documente relevante în baza locală…PublicAI răspunde doar cu informații publice ale Primăriei Sector 2"
 
@@ -37,7 +36,6 @@ NO_ANS = "Nu am găsit documente relevante în baza locală…PublicAI răspunde
 # Clients
 # =========================
 client = OpenAI(api_key=OPENAI_API_KEY)
-redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 
 embedding_fn = SentenceTransformerEmbeddingFunction(model_name="BAAI/bge-m3")
 chroma = chromadb.PersistentClient(path=CHROMA_PATH, settings=Settings(anonymized_telemetry=False))
@@ -50,55 +48,45 @@ else:
         raise RuntimeError("Nu există colecții în Chroma la CHROMA_PATH.")
     collection = chroma.get_collection(cols[0].name, embedding_function=embedding_fn)
 
-# CrossEncoder re-ranker (calitate mai bună)
+# CrossEncoder re-ranker
 reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
 
 # =========================
-# Helpers (session memory cu fallback)
+# Helpers — memorie pe prompt + fallback LRU în RAM
 # =========================
-MEM_FALLBACK: Dict[str, List[Dict[str, str]]] = {}
-MEM_LOCK = threading.Lock()
+# LRU per session_id: max 10 mesaje (user/assistant), TTL 60 min
+_MEM: Dict[str, Dict[str, Any]] = {}
+_MEM_LOCK = threading.Lock()
+_MEM_TTL_SEC = 3600
+_MEM_MAX_MSGS = 10
 
-def _redis_ok() -> bool:
-    try:
-        redis_client.ping()
-        return True
-    except Exception:
-        return False
+def _now() -> float:
+    return time.time()
 
-def s_key(sid: str) -> str:
-    return f"chat:session:{sid}"
+def _cleanup_mem():
+    now = _now()
+    stale = [sid for sid, rec in _MEM.items() if now - rec.get("t", 0) > _MEM_TTL_SEC]
+    for sid in stale:
+        _MEM.pop(sid, None)
 
-def get_hist(sid: str) -> List[Dict[str, str]]:
+def _get_mem_hist(sid: str) -> List[Dict[str, str]]:
     if not sid:
         return []
-    if _redis_ok():
-        try:
-            raw = redis_client.get(s_key(sid))
-            return json.loads(raw) if raw else []
-        except Exception:
-            pass
-    with MEM_LOCK:
-        return MEM_FALLBACK.get(sid, [])
+    with _MEM_LOCK:
+        rec = _MEM.get(sid)
+        if not rec:
+            return []
+        rec["t"] = _now()
+        return list(rec["hist"])
 
-def save_msg(sid: str, role: str, content: str):
+def _save_mem_msg(sid: str, role: str, content: str):
     if not sid:
         return
-    if _redis_ok():
-        try:
-            hist = get_hist(sid)
-            hist.append({"role": role, "content": content})
-            if len(hist) > 10:
-                hist = hist[-10:]
-            redis_client.set(s_key(sid), json.dumps(hist), ex=3600)
-            return
-        except Exception:
-            pass
-    with MEM_LOCK:
-        MEM_FALLBACK.setdefault(sid, [])
-        MEM_FALLBACK[sid].append({"role": role, "content": content})
-        if len(MEM_FALLBACK[sid]) > 10:
-            MEM_FALLBACK[sid] = MEM_FALLBACK[sid][-10:]
+    with _MEM_LOCK:
+        _cleanup_mem()
+        rec = _MEM.setdefault(sid, {"hist": deque(maxlen=_MEM_MAX_MSGS), "t": _now()})
+        rec["hist"].append({"role": role, "content": content})
+        rec["t"] = _now()
 
 def summarize_url(url: str) -> str:
     try:
@@ -111,6 +99,7 @@ def summarize_url(url: str) -> str:
         return url
 
 def system_prompt() -> str:
+    # Păstrăm aceleași reguli de răspuns
     return (
         "Ești PublicAI, asistent al unei instituții publice.\n"
         "- Folosește EXCLUSIV fragmentele furnizate (RAG). Nu inventa.\n"
@@ -118,7 +107,7 @@ def system_prompt() -> str:
         "- Structură: 1) răspuns direct în 1–2 fraze; 2) dacă e util, 1–3 puncte cheie.\n"
         "- Dacă informația nu există în fragmente, răspunde EXACT:\n"
         "  «Nu am găsit documente relevante în baza locală…PublicAI răspunde doar cu informații publice ale Primăriei Sector 2»\n"
-        "- La final voi adăuga eu: «Sursă: {link} (URL)». Respectă contextul sesiunii."
+       
     )
 
 def simple_sent_split(text: str) -> List[str]:
@@ -143,9 +132,7 @@ def build_user_prompt(question: str, ctxs: List[Dict[str, Any]]) -> str:
     for i, c in enumerate(ctxs, 1):
         snippet = support_sents(c['doc'], question, limit_words=90)
         blocks.append(f"[Fragment {i}]\n{snippet}\n(Sursă: {c['src']})")
-
     fragments_text = "\n\n".join(blocks) if blocks else "(niciun fragment)"
-
     return (
         f"Întrebare: {question}\n\n"
         f"Fragmente (folosește DOAR acestea):\n{fragments_text}\n\n"
@@ -153,15 +140,14 @@ def build_user_prompt(question: str, ctxs: List[Dict[str, Any]]) -> str:
     )
 
 def retrieve(q: str) -> List[Dict[str, Any]]:
-    # candidati mai mulți pentru re-rank
     res = collection.query(
         query_texts=[q],
         n_results=max(TOP_K * 5, 20),
         include=["documents", "metadatas", "distances"],
     )
-    docs = res["documents"][0]
-    metas = res["metadatas"][0]
-    dists = res["distances"][0]
+    docs = res["documents"][0] if res["documents"] else []
+    metas = res["metadatas"][0] if res["metadatas"] else []
+    dists = res["distances"][0] if res["distances"] else []
     candidates = []
     for d, m, dist in zip(docs, metas, dists):
         if not d:
@@ -197,13 +183,29 @@ def trim_words(text: str, n: int = MAX_WORDS) -> str:
     return " ".join(words[:n]) + ("…" if len(words) > n else "")
 
 # =========================
-# API
+# API models
 # =========================
+class Msg(BaseModel):
+    role: str = Field(..., description="user sau assistant")
+    content: str
+
+    @validator("role")
+    def _role_ok(cls, v):
+        v = v.strip()
+        if v not in ("user", "assistant"):
+            raise ValueError("role trebuie să fie 'user' sau 'assistant'")
+        return v
+
 class ChatIn(BaseModel):
     session_id: Optional[str] = "web"
     question: str
+    # memorie pe prompt – istoric opțional trimis de UI
+    history: Optional[List[Msg]] = None
 
-app = FastAPI(title="PublicAI — RAG + FastAPI + Redis (clean stream)")
+# =========================
+# FastAPI app
+# =========================
+app = FastAPI(title="PublicAI — RAG + FastAPI (memorie pe prompt, no-redis)")
 
 static_dir = os.path.join(ROOT_DIR, "static")
 if os.path.isdir(static_dir):
@@ -217,18 +219,41 @@ def root():
 def health():
     return {"status": "ok"}
 
+# =========================
+# Utilitare istoric efectiv folosit
+# =========================
+def _clip_history(msgs: List[Dict[str, str]], n_pairs: int = 3) -> List[Dict[str, str]]:
+    """Ultimele n_pairs (user+assistant => 2*n_pairs mesaje)."""
+    return msgs[-(2 * n_pairs):] if msgs else []
+
+def _merge_prompt_history(body: ChatIn) -> List[Dict[str, str]]:
+    """
+    Ia prioritar history din UI; dacă lipsește, folosește fallback LRU per session_id.
+    """
+    if body.history:
+        hist = [{"role": m.role, "content": m.content} for m in body.history]
+    else:
+        hist = _get_mem_hist(body.session_id or "web")
+    return _clip_history(hist, n_pairs=3)
+
+# =========================
+# /chat (sync)
+# =========================
 @app.post("/chat")
 def chat(body: ChatIn):
     sid = body.session_id or "web"
-    q = body.question.strip()
+    q = (body.question or "").strip()
+    if not q:
+        return JSONResponse({"answer": "Te rog formulează o întrebare.", "citations": ""})
+
     ctxs = retrieve(q)
-    save_msg(sid, "user", q)
+    _save_mem_msg(sid, "user", q)
 
     if not ctxs:
-        save_msg(sid, "assistant", NO_ANS)
+        _save_mem_msg(sid, "assistant", NO_ANS)
         return JSONResponse({"answer": NO_ANS, "citations": ""})
 
-    history = get_hist(sid)[-6:]
+    history = _merge_prompt_history(body)
     messages = [{"role": "system", "content": system_prompt()}]
     messages.extend(history)
     messages.append({"role": "user", "content": build_user_prompt(q, ctxs)})
@@ -242,18 +267,28 @@ def chat(body: ChatIn):
     )
     answer = comp.choices[0].message.content or ""
     answer = trim_words(answer, MAX_WORDS).strip()
-    save_msg(sid, "assistant", answer)
+    _save_mem_msg(sid, "assistant", answer)
 
     main_src = ctxs[0]["src"]
     citations = f"[{summarize_url(main_src)}]({main_src})" if main_src else ""
     return JSONResponse({"answer": answer, "citations": citations})
 
+# =========================
+# /chat/stream (SSE)
+# =========================
 @app.post("/chat/stream")
 def chat_stream(body: ChatIn):
     sid = body.session_id or "web"
-    q = body.question.strip()
+    q = (body.question or "").strip()
+    if not q:
+        def empty_gen():
+            yield "data: Te rog formulează o întrebare.\n\n"
+            yield "event: done\ndata: ok\n\n"
+        return StreamingResponse(empty_gen(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"})
+
     ctxs = retrieve(q)
-    save_msg(sid, "user", q)
+    _save_mem_msg(sid, "user", q)
 
     def gen():
         yield "event: ping\ndata: 1\n\n"
@@ -263,7 +298,7 @@ def chat_stream(body: ChatIn):
             yield "event: done\ndata: ok\n\n"
             return
 
-        history = get_hist(sid)[-6:]
+        history = _merge_prompt_history(body)
         messages = [{"role": "system", "content": system_prompt()}]
         messages.extend(history)
         messages.append({"role": "user", "content": build_user_prompt(q, ctxs)})
@@ -271,7 +306,6 @@ def chat_stream(body: ChatIn):
         def count_words(s: str) -> int:
             return len(re.findall(r"\b\w+\b", s, flags=re.UNICODE))
 
-        wc = 0
         accum = ""
         last_ping = time.time()
 
@@ -292,13 +326,12 @@ def chat_stream(body: ChatIn):
                     last_ping = time.time()
                 continue
 
-            tentative = accum + delta
-            words_now = count_words(tentative)
-
-            if words_now <= MAX_WORDS:
+            tentative = (accum + delta)
+            if count_words(tentative) <= MAX_WORDS:
                 accum = tentative
                 yield f"data: {delta}\n\n"
             else:
+                # taie strict la MAX_WORDS
                 cur = accum
                 stop_idx = 0
                 for i, ch in enumerate(delta):
@@ -317,7 +350,7 @@ def chat_stream(body: ChatIn):
                 last_ping = time.time()
 
         ans = accum.strip()
-        save_msg(sid, "assistant", ans)
+        _save_mem_msg(sid, "assistant", ans)
 
         main_src = ctxs[0]["src"]
         src_label = summarize_url(main_src) if main_src else "necunoscută"
@@ -327,10 +360,5 @@ def chat_stream(body: ChatIn):
     return StreamingResponse(
         gen(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )
-
