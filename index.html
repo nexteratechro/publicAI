@@ -30,7 +30,7 @@
       const input = document.getElementById('user-input');
       const messages = document.getElementById('messages');
 
-      // Session ID persistent
+      // --- Session ID persistent (original)
       function getSessionId(){
         const k = 'publicai_session_id';
         let v = localStorage.getItem(k);
@@ -42,6 +42,16 @@
       }
       const SESSION_ID = getSessionId();
 
+      // === MEMORIE PE PROMPT: ultimele 3 ture (user+assistant × 3) — ADĂUGAT
+      const hist = [];
+      const MAX_TURNS = 3;
+      function pushTurn(userText, assistantText){
+        hist.push({ role: "user", content: userText });
+        if (assistantText) hist.push({ role: "assistant", content: assistantText });
+        while (hist.length > MAX_TURNS * 2) hist.shift();
+      }
+
+      // --- UI helpers (original)
       function addMessage(text, role='bot', returnNode=false){
         const row = document.createElement('div');
         row.className = role === 'user' ? 'text-right' : 'text-left';
@@ -66,13 +76,13 @@
         }).join(' <span class="text-gray-400">|</span> ');
       }
 
-      // autosize
+      // autosize (original)
       input.addEventListener('input', () => {
         input.style.height = 'auto';
         input.style.height = Math.min(input.scrollHeight, 220) + 'px';
       });
 
-      // Enter = trimite, Shift+Enter = newline
+      // Enter = trimite, Shift+Enter = newline (original)
       input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
           e.preventDefault();
@@ -90,17 +100,16 @@
 
         const thinking = addMessage('', 'bot', true); // pornește gol
 
-        // Heuristică: dacă chunk-ul începe cu " spațiu + literă" iar textul curent
-        // se termină în literă, elimină DOAR spațiul (evităm "Pent ru").
+        // Heuristică spații (original)
         const startsWithSpaceLetter = (s) => /^\s\p{L}/u.test(s);
         const endsWithLetter = (s) => /\p{L}$/u.test(s);
 
         const appendChunk = (chunk) => {
           if (!chunk) return;
           if (startsWithSpaceLetter(chunk) && endsWithLetter(thinking.textContent) && !thinking.textContent.endsWith(' ')) {
-            chunk = chunk.replace(/^\s/, ''); // taie spațiul care ar rupe cuvântul
+            chunk = chunk.replace(/^\s/, '');
           }
-          thinking.textContent += chunk; // păstrează restul exact cum vine
+          thinking.textContent += chunk;
           messages.scrollTop = messages.scrollHeight;
         };
 
@@ -114,11 +123,15 @@
         };
 
         try {
-          // 1) Streaming SSE
+          // 1) Streaming SSE — TRIMITE ACUM ȘI HISTORY (ADĂUGAT)
           const res = await fetch('/chat/stream', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ question: text, session_id: SESSION_ID })
+            body: JSON.stringify({
+              question: text,
+              session_id: SESSION_ID,
+              history: hist.slice() // ultimele 3 ture
+            })
           });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
@@ -140,25 +153,33 @@
             for (const part of parts) {
               const line = part.split('\n').find(l => l.startsWith('data:'));
               if (!line) continue;
-              const payload = line.slice(5); // păstrează spațiile pentru heuristica de mai sus
+              const payload = line.slice(5); // păstrează spațiile
               if (!payload) continue;
 
               if (/^\s*sursă:/i.test(payload)) {
                 appendSource(payload.trim());
               } else if (payload.trim().toLowerCase() === 'ok') {
-                // final
+                // final stream (original: fără acțiune)
               } else {
                 appendChunk(payload);
               }
             }
           }
+
+          // La finalul stream-ului avem textul complet în 'thinking.textContent' — SALVĂM TURA (ADĂUGAT)
+          pushTurn(text, thinking.textContent.trim());
+
         } catch (err) {
-          // 2) Fallback: răspuns JSON final
+          // 2) Fallback JSON — TRIMITE ȘI HISTORY + SALVEAZĂ TURA (ADĂUGAT)
           try {
             const res2 = await fetch('/chat', {
               method: 'POST',
               headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({ question: text, session_id: SESSION_ID })
+              body: JSON.stringify({
+                question: text,
+                session_id: SESSION_ID,
+                history: hist.slice()
+              })
             });
             if (!res2.ok) throw new Error(`HTTP ${res2.status}`);
             const data = await res2.json();
@@ -171,6 +192,8 @@
               div.innerHTML = mdLinksToHtml(citations);
               thinking.appendChild(div);
             }
+            // SALVĂM TURA (ADĂUGAT)
+            pushTurn(text, answer.trim());
           } catch (err2) {
             thinking.textContent = 'A apărut o eroare la apelul către server.';
             console.error(err2);
