@@ -1,205 +1,406 @@
 <!doctype html>
-<html lang="ro">
+<html lang="ro" class="h-full">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>PublicAI — Demo RAG</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PublicAI — Demo Chat</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    :root{ --brand:#08c4a7; }
-    body{ font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial; }
-  </style>
+    :root{ --brand:#08c4a7; --brand-2:#ff8a34; }
+    html,body{ font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+    body{ background:#ffffff; color:#111; }
+
+    /* Gradient doar în zona hero */
+    .site-gradient-bg{background:
+      radial-gradient(1000px 500px at 20% -10%, rgba(8,196,167,.25), transparent),
+      radial-gradient(800px 400px at 80% -10%, rgba(255,138,52,.18), transparent),
+      linear-gradient(180deg,#0b0f14 0%, #0a0d11 100%)}
+
+    .hero-gradient{ color:#fff; }
+
+    .chat-card{ background:#fff; color:#111; }
+
+    /* === Logo sizing egal (aceeași lățime și înălțime vizuală) === */
+    .logo-box{
+  width: min(35vw, 420px);
+  height: clamp(110px, 18vw, 180px);
+}
+    .logo-img{ width:100%; height:100%; object-fit:contain; display:block; }
+
+    /* Header mai compact (micșorat) */
+    .hero-tight{ padding-top: .5rem; padding-bottom: .5rem; }
+    @media (min-width:768px){ .hero-tight{ padding-top: .75rem; padding-bottom: .75rem; } }
+
+    /* Chat bubbles */
+    .msg-row{ display:flex; align-items:flex-start; gap:12px; }
+    .msg-row.user{ justify-content:flex-end; }
+    .avatar{ height:36px; width:36px; border-radius:10px; border:1px solid rgba(0,0,0,.1); background:#f3f4f6; display:grid; place-items:center; overflow:hidden; }
+    .bubble{ max-width:85%; border-radius:16px; padding:10px 14px; white-space:pre-wrap; }
+    .bubble-bot{ background:#f3f4f6; color:#111; }
+    .bubble-user{ background: var(--brand); color:#fff; font-weight:600; }
+  
+    /* === Card oficial (format bot) === */
+    .bot-card {
+      background: #fdfdfd;
+      border: 1px solid #e3e3e3;
+      border-radius: 12px;
+      padding: 14px;
+      margin: 8px 0;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+      line-height: 1.55;
+    }
+    .bot-card h4 {
+      margin: 0 0 8px 0;
+      font-size: 0.98rem;
+      color: #003366;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: .5rem;
+    }
+    .bot-card h4 .icon { font-size: 1.05rem; }
+    .bot-card p { margin: 6px 0 8px 0; }
+    .bot-card .idea {
+      margin: 6px 0;
+      padding-left: 10px;
+      border-left: 3px solid #cce0ff;
+      font-style: italic;
+    }
+    .bot-card .source {
+      margin-top: 10px;
+      font-size: 0.85em;
+      color: #555;
+    }
+    .bot-card .source a { color: #0050aa; text-decoration: none; }
+    .bot-card .source a:hover { text-decoration: underline; }
+
+</style>
 </head>
-<body class="bg-white text-gray-900">
-  <main class="max-w-3xl mx-auto p-4 sm:p-6">
-    <h1 class="text-2xl font-bold mb-2">PublicAI — Chat</h1>
-    <p class="text-sm text-gray-600 mb-4">Răspunsuri politicoase, max 100 cuvinte, strict din baza locală, cu sursă.</p>
+<body class="h-full theme-hero-gradient">
+  <div class="flex h-full min-h-screen flex-col">
 
-    <div id="messages" class="border rounded-xl p-4 h-[60vh] overflow-y-auto mb-3 space-y-2 bg-gray-50"></div>
+    <!-- HERO section cu gradient (MICȘORAT) -->
+    <header class="border-b border-black/10">
+      <section class="site-gradient-bg hero-gradient hero-tight">
+        <div class="mx-auto max-w-5xl px-4">
+          <div class="grid md:grid-cols-12 gap-3 items-center">
+            <div class="md:col-span-5 flex items-center justify-center">
+              <div class="logo-box"><img src="/static/logo-publicai.png" alt="PublicAI" class="logo-img" /></div>
+            </div>
+            <div class="md:col-span-7">
+              <div class="inline-flex items-center gap-2 rounded-full border border-white/20 px-3 py-1 text-xs text-white/80">PublicAI • Chatbot pentru instituții</div>
+              <h1 class="mt-2 text-xl sm:text-2xl font-extrabold leading-tight">
+  Salut! Eu sunt PublicAI, asistentul inteligent de la Primăria Sectorului 2 🏛️
+</h1>
+<p class="mt-1 text-white/80 text-sm">
+  Pot să îți ofer răspunsuri rapide și clare la întrebări despre activitatea, serviciile și programele oficiale derulate de primărie și echipa de administrație locală.
+</p>
+<ul class="mt-2 grid gap-1.5 text-[13px] text-white/85 list-disc pl-5">
+  <li>Răspund doar din surse oficiale — nu folosesc căutare pe internet</li>
+  <li>Te rog să îmi scrii întrebările cât mai clar</li>
+  <li>Promit să îți răspund politicos, concis și corect 💬</li>
+</ul>
+            </div>
+          </div>
+        </div>
+      </section>
+    </header>
 
-    <form id="chat-form" class="flex gap-2 items-end">
-      <textarea id="user-input" rows="1" placeholder="Scrie un mesaj și apasă Enter…"
-        class="flex-1 resize-none p-3 border rounded-xl focus:outline-none focus:border-[var(--brand)]"></textarea>
-      <button type="submit" class="px-4 py-3 rounded-xl bg-[var(--brand)] text-white font-semibold">Trimite</button>
-    </form>
-  </main>
+    <!-- MAIN cu fundal alb -->
+    <main class="flex-1 bg-white">
+      <div class="mx-auto max-w-5xl px-4 py-8 grid lg:grid-cols-12 gap-8 items-start">
+        <!-- Col text NextEra -->
+        <section class="lg:col-span-5 order-2 lg:order-1">
+          <div class="rounded-2xl border border-black/10 bg-white p-5">
+            <div class="flex items-center gap-3">
+              <div class="logo-box"><img src="/static/logo-nextera.png" alt="NextEra Tech" class="logo-img"/></div>
+              <span class="text-sm text-black/60">Powered by NextEra Tech</span>
+            </div>
+            <p class="mt-4 text-sm text-black/75">Platformă end-to-end: de la colectarea datelor (crawl, PDF, imagini) până la răspunsuri verificate. Implementare rapidă, mentenanță minimă.</p>
+            <div class="mt-4 grid gap-3">
+              <div class="rounded-xl border border-black/10 bg-gray-50 p-3">
+                <div class="font-semibold text-sm">Crawl + PDF + OCR</div>
+                <div class="text-xs text-black/70">Spider inteligent, harvesting PDF pe secțiuni, OCR în română pentru imagini & PDF-uri scanate.</div>
+              </div>
+              <div class="rounded-xl border border-black/10 bg-gray-50 p-3">
+                <div class="font-semibold text-sm">Răspunsuri cu surse</div>
+                <div class="text-xs text-black/70">Strict din baza locală, sursele listate pentru audit și transparență.</div>
+              </div>
+              <div class="rounded-xl border border-black/10 bg-gray-50 p-3">
+                <div class="font-semibold text-sm">Chroma local / server</div>
+                <div class="text-xs text-black/70">Păstrezi controlul datelor. Persistență pe disc sau pe server dedicat.</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Col Chat (ALB) -->
+        <section class="lg:col-span-7 order-1 lg:order-2">
+          <div class="chat-card rounded-2xl border border-black/10 shadow-xl flex flex-col h-[62vh] sm:h-[68vh] lg:h-[70vh]">
+            <div id="messages" class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3">
+              <div class="msg-row">
+                <div class="avatar">
+                  <img src="/static/logo-publicai.png" alt="PublicAI" style="height:100%; width:100%; object-fit:contain"/>
+                </div>
+                <div class="bubble bubble-bot">Salut! Sunt PublicAI. Scrie-mi o întrebare ca să-ți arăt interfața.</div>
+              </div>
+            </div>
+            <form id="chat-form" class="border-t border-black/10 p-3 sm:p-4">
+              <div class="relative flex items-end gap-2">
+                <textarea id="user-input" rows="1" placeholder="Scrie un mesaj și apasă Enter…"
+                  class="min-h-[44px] max-h-40 w-full resize-none rounded-xl border border-black/10 bg-white px-4 py-3 text-[#111] placeholder-gray-500 outline-none focus:border-[var(--brand)]"></textarea>
+                <button type="submit" aria-label="Trimite"
+                  class="shrink-0 rounded-xl bg-[var(--brand)] px-4 py-3 font-semibold text-white hover:opacity-90">
+                  Trimite
+                </button>
+              </div>
+            </form>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="py-6 text-center text-gray-500 text-xs border-t border-black/10 bg-white">
+      © <span id="year"></span> PublicAI • NextEra Tech
+    </footer>
+  </div>
 
   <script>
-    document.addEventListener('DOMContentLoaded', () => {
-      const form = document.getElementById('chat-form');
-      const input = document.getElementById('user-input');
-      const messages = document.getElementById('messages');
+    document.getElementById('year').textContent = new Date().getFullYear();
 
-      // --- Session ID persistent (original)
-      function getSessionId(){
-        const k = 'publicai_session_id';
-        let v = localStorage.getItem(k);
-        if (!v) {
-          v = crypto.randomUUID ? crypto.randomUUID() : (Date.now() + '-' + Math.random().toString(16).slice(2));
-          localStorage.setItem(k, v);
-        }
-        return v;
+    const form = document.getElementById('chat-form');
+    const input = document.getElementById('user-input');
+    const messages = document.getElementById('messages');
+
+    // --- Session ID persistent (din index.html actual)
+    function getSessionId(){
+      const k = 'publicai_session_id';
+      let v = localStorage.getItem(k);
+      if (!v) {
+        v = crypto.randomUUID ? crypto.randomUUID() : (Date.now() + '-' + Math.random().toString(16).slice(2));
+        localStorage.setItem(k, v);
       }
-      const SESSION_ID = getSessionId();
+      return v;
+    }
+    const SESSION_ID = getSessionId();
 
-      // === MEMORIE PE PROMPT: ultimele 3 ture (user+assistant × 3) — ADĂUGAT
-      const hist = [];
-      const MAX_TURNS = 3;
-      function pushTurn(userText, assistantText){
-        hist.push({ role: "user", content: userText });
-        if (assistantText) hist.push({ role: "assistant", content: assistantText });
-        while (hist.length > MAX_TURNS * 2) hist.shift();
-      }
+    // === Memorie pe prompt: ultimele 3 ture (user+assistant × 3) — din index.html actual
+    const hist = [];
+    const MAX_TURNS = 3;
+    function pushTurn(userText, assistantText){
+      hist.push({ role: "user", content: userText });
+      if (assistantText) hist.push({ role: "assistant", content: assistantText });
+      while (hist.length > MAX_TURNS * 2) hist.shift();
+    }
 
-      // --- UI helpers (original)
-      function addMessage(text, role='bot', returnNode=false){
-        const row = document.createElement('div');
-        row.className = role === 'user' ? 'text-right' : 'text-left';
-        const bubble = document.createElement('div');
-        bubble.className = 'inline-block max-w-[80%] rounded-2xl px-3 py-2 ' + (role==='user' ? 'bg-[var(--brand)] text-white' : 'bg-white border');
-        bubble.textContent = text;
-        row.appendChild(bubble);
-        messages.appendChild(row);
-        messages.scrollTop = messages.scrollHeight;
-        return returnNode ? bubble : null;
-      }
+    // autosize
+    input.addEventListener('input', () => {
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, 240) + 'px';
+    });
 
-      function mdLinksToHtml(md){
-        return md.split(/\]\(/).map((chunk, i) => {
-          if(i===0) return chunk;
-          const parts = chunk.split(")");
-          const href = parts[0];
-          const labelPart = md.split(/\]\(/)[i-1];
-          const label = labelPart.substring(labelPart.lastIndexOf("[")+1);
-          if(!/^https?:\/\//.test(href)) return label;
-          return `<a href="${href}" target="_blank" rel="noopener" class="underline decoration-[var(--brand)]">${label}</a>`;
-        }).join(' <span class="text-gray-400">|</span> ');
-      }
-
-      // autosize (original)
-      input.addEventListener('input', () => {
-        input.style.height = 'auto';
-        input.style.height = Math.min(input.scrollHeight, 220) + 'px';
-      });
-
-      // Enter = trimite, Shift+Enter = newline (original)
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault();
-          form.requestSubmit();
-        }
-      });
-
-      form.addEventListener('submit', async (e) => {
+    // Enter = trimite; Shift+Enter = linie nouă
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        const text = input.value.trim();
-        if(!text) return;
+        form.dispatchEvent(new Event('submit'));
+      }
+    });
 
-        addMessage(text, 'user');
-        input.value=''; input.style.height='auto';
+    // UI helpers (adaptate la noul design)
+    function addMessage(text, role='bot', returnNode=false){
+      const row = document.createElement('div');
+      row.className = 'msg-row' + (role === 'user' ? ' user' : '');
 
-        const thinking = addMessage('', 'bot', true); // pornește gol
+      if(role !== 'user'){
+        const avatar = document.createElement('div');
+        avatar.className = 'avatar';
+        const img = document.createElement('img');
+        img.src = '/static/logo-publicai.png';
+        img.alt = 'PublicAI';
+        img.style.cssText = 'height:100%;width:100%;object-fit:contain';
+        avatar.appendChild(img);
+        row.appendChild(avatar);
+      }
 
-        // Heuristică spații (original)
-        const startsWithSpaceLetter = (s) => /^\s\p{L}/u.test(s);
-        const endsWithLetter = (s) => /\p{L}$/u.test(s);
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble ' + (role==='user' ? 'bubble-user' : 'bubble-bot');
+      bubble.textContent = text;
+      row.appendChild(bubble);
 
-        const appendChunk = (chunk) => {
-          if (!chunk) return;
-          if (startsWithSpaceLetter(chunk) && endsWithLetter(thinking.textContent) && !thinking.textContent.endsWith(' ')) {
-            chunk = chunk.replace(/^\s/, '');
+      messages.appendChild(row);
+      messages.scrollTop = messages.scrollHeight;
+      return returnNode ? bubble : null;
+    }
+
+    function mdLinksToHtml(md){
+      return md.split(/\]\(/).map((chunk, i) => {
+        if(i===0) return chunk;
+        const parts = chunk.split(")");
+        const href = parts[0];
+        const labelPart = md.split(/\]\(/)[i-1];
+        const label = labelPart.substring(labelPart.lastIndexOf("[")+1);
+        if(!/^https?:\/\//.test(href)) return label;
+        return `<a href="${href}" target="_blank" rel="noopener" class="underline decoration-[var(--brand)]">${label}</a>`;
+      }).join(' <span class="text-black/30">|</span> ');
+    }
+
+    // Heuristici pentru un stream frumos (din index.html actual)
+    const startsWithSpaceLetter = (s) => /^\s\p{L}/u.test(s);
+    const endsWithLetter = (s) => /\p{L}$/u.test(s);
+
+    // Markdown [label](url) -> HTML link
+    function mdToLinks(md) {
+      return (md || '').replace(
+        /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+        '<a href="$2" target="_blank" rel="noopener">$1</a>'
+      );
+    }
+
+    // Formatter „Card oficial” — aplicat o singură dată, DUPĂ ce s-a încheiat stream-ul
+    function formatCardOfficial(rawText, sourcesArr = []) {
+      if (!rawText) return '';
+      // 1) Curățare: elimină secvențe gen "1 1 1 1 1", normalizează spații
+      let text = rawText
+        .replace(/(\b\d+\b\s*){3,}/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      // 2) Împarte în idei după ' - '
+      const parts = text.split(/\s-\s/).map(s => s.trim()).filter(Boolean);
+      const first = parts.shift() || text;
+
+      // 3) Card
+      let html = '<div class="bot-card">'
+        + '<h4><span class="icon">📘</span>Răspuns oficial</h4>'
+        + '<p>' + first + '</p>';
+      for (const idea of parts) {
+        html += '<div class="idea">▫️ ' + idea + '</div>';
+      }
+
+      // 4) Surse
+      if (sourcesArr.length) {
+        const merged = sourcesArr.join(' ');
+        html += '<div class="source">' + mdToLinks(merged) + '</div>';
+      }
+      html += '</div>';
+      return html;
+    }
+
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+
+      addMessage(text, 'user');
+      input.value = '';
+      input.style.height = 'auto';
+
+      const thinking = addMessage('', 'bot', true); // pornește gol și primim bucăți prin stream
+      let accumText = '';
+      const sourceLines = [];
+
+      const appendChunk = (chunk) => {
+        if (!chunk) return;
+        if (startsWithSpaceLetter(chunk) && endsWithLetter(thinking.textContent) && !thinking.textContent.endsWith(' ')) {
+          chunk = chunk.replace(/^\s/, '');
+        }
+        thinking.textContent += chunk;
+        accumText += chunk;
+        messages.scrollTop = messages.scrollHeight;
+      };
+
+      const appendSource = (mdLine) => {
+        const clean = mdLine.replace(/^Sursă:\s*/,'').trim();
+        if (!clean) return;
+        sourceLines.push(clean);
+      };
+
+      try {
+        // 1) Streaming SSE — TRIMITE ȘI HISTORY
+        const res = await fetch('/chat/stream', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            question: text,
+            session_id: SESSION_ID,
+            history: hist.slice()
+          })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        if (!res.body || !res.headers.get('content-type')?.includes('text/event-stream')) {
+          throw new Error('No stream; fallback');
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const {value, done} = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, {stream: true});
+
+          const parts = buffer.split('\n\n');
+          buffer = parts.pop();
+          for (const part of parts) {
+            const line = part.split('\n').find(l => l.startsWith('data:'));
+            if (!line) continue;
+            const payload = line.slice(5); // păstrează spațiile
+            if (!payload) continue;
+
+            if (/^\s*sursă:/i.test(payload)) {
+              appendSource(payload.trim());
+            } else if (payload.trim().toLowerCase() === 'ok') {
+              // final
+            } else {
+              appendChunk(payload);
+            }
           }
-          thinking.textContent += chunk;
-          messages.scrollTop = messages.scrollHeight;
-        };
+        }
 
-        const appendSource = (mdLine) => {
-          const clean = mdLine.replace(/^Sursă:\s*/,'').trim();
-          if (!clean) return;
-          const div = document.createElement('div');
-          div.className = 'mt-1 text-xs text-gray-600';
-          div.innerHTML = mdLinksToHtml(clean);
-          thinking.appendChild(div);
-        };
+        // Post-procesare: rescrie bula în format „Card oficial”
+        const formatted = formatCardOfficial(thinking.textContent, sourceLines);
+        thinking.innerHTML = formatted;
 
+        // salvează tura în memorie locală
+        pushTurn(text, thinking.textContent.trim());
+
+      } catch (err) {
+        // 2) Fallback JSON — /chat
         try {
-          // 1) Streaming SSE — TRIMITE ACUM ȘI HISTORY (ADĂUGAT)
-          const res = await fetch('/chat/stream', {
+          const res2 = await fetch('/chat', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
               question: text,
               session_id: SESSION_ID,
-              history: hist.slice() // ultimele 3 ture
+              history: hist.slice()
             })
           });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-          if (!res.body || !res.headers.get('content-type')?.includes('text/event-stream')) {
-            throw new Error('No stream; fallback');
+          if (!res2.ok) throw new Error(`HTTP ${res2.status}`);
+          const data = await res2.json();
+          const answer = (data.answer || '');
+          const citations = (data.citations || '').trim();
+          const formatted = formatCardOfficial(answer, citations ? [citations] : []);
+          thinking.innerHTML = formatted;
+          if (citations) {
+            const div = document.createElement('div');
+            div.className = 'mt-1 text-xs text-black/70';
+            div.innerHTML = mdLinksToHtml(citations);
+            thinking.appendChild(div);
           }
-
-          const reader = res.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = '';
-
-          while (true) {
-            const {value, done} = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, {stream: true});
-
-            const parts = buffer.split('\n\n');
-            buffer = parts.pop();
-            for (const part of parts) {
-              const line = part.split('\n').find(l => l.startsWith('data:'));
-              if (!line) continue;
-              const payload = line.slice(5); // păstrează spațiile
-              if (!payload) continue;
-
-              if (/^\s*sursă:/i.test(payload)) {
-                appendSource(payload.trim());
-              } else if (payload.trim().toLowerCase() === 'ok') {
-                // final stream (original: fără acțiune)
-              } else {
-                appendChunk(payload);
-              }
-            }
-          }
-
-          // La finalul stream-ului avem textul complet în 'thinking.textContent' — SALVĂM TURA (ADĂUGAT)
-          pushTurn(text, thinking.textContent.trim());
-
-        } catch (err) {
-          // 2) Fallback JSON — TRIMITE ȘI HISTORY + SALVEAZĂ TURA (ADĂUGAT)
-          try {
-            const res2 = await fetch('/chat', {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({
-                question: text,
-                session_id: SESSION_ID,
-                history: hist.slice()
-              })
-            });
-            if (!res2.ok) throw new Error(`HTTP ${res2.status}`);
-            const data = await res2.json();
-            const answer = (data.answer || '');
-            const citations = (data.citations || '').trim();
-            thinking.textContent = answer;
-            if (citations) {
-              const div = document.createElement('div');
-              div.className = 'mt-1 text-xs text-gray-600';
-              div.innerHTML = mdLinksToHtml(citations);
-              thinking.appendChild(div);
-            }
-            // SALVĂM TURA (ADĂUGAT)
-            pushTurn(text, answer.trim());
-          } catch (err2) {
-            thinking.textContent = 'A apărut o eroare la apelul către server.';
-            console.error(err2);
-          }
+          pushTurn(text, answer.trim());
+        } catch (err2) {
+          thinking.textContent = 'A apărut o eroare la apelul către server.';
+          console.error(err2);
         }
-      });
+      }
     });
   </script>
 </body>
