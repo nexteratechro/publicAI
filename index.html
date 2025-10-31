@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>PublicAI — Demo RAG</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root{ --brand:#08c4a7; }
+    body{ font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial; }
+  </style>
+</head>
+<body class="bg-white text-gray-900">
+  <main class="max-w-3xl mx-auto p-4 sm:p-6">
+    <h1 class="text-2xl font-bold mb-2">PublicAI — Chat</h1>
+    <p class="text-sm text-gray-600 mb-4">Răspunsuri politicoase, max 100 cuvinte, strict din baza locală, cu sursă.</p>
+
+    <div id="messages" class="border rounded-xl p-4 h-[60vh] overflow-y-auto mb-3 space-y-2 bg-gray-50"></div>
+
+    <form id="chat-form" class="flex gap-2 items-end">
+      <textarea id="user-input" rows="1" placeholder="Scrie un mesaj și apasă Enter…"
+        class="flex-1 resize-none p-3 border rounded-xl focus:outline-none focus:border-[var(--brand)]"></textarea>
+      <button type="submit" class="px-4 py-3 rounded-xl bg-[var(--brand)] text-white font-semibold">Trimite</button>
+    </form>
+  </main>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const form = document.getElementById('chat-form');
+      const input = document.getElementById('user-input');
+      const messages = document.getElementById('messages');
+
+      // --- Session ID persistent (original)
+      function getSessionId(){
+        const k = 'publicai_session_id';
+        let v = localStorage.getItem(k);
+        if (!v) {
+          v = crypto.randomUUID ? crypto.randomUUID() : (Date.now() + '-' + Math.random().toString(16).slice(2));
+          localStorage.setItem(k, v);
+        }
+        return v;
+      }
+      const SESSION_ID = getSessionId();
+
+      // === MEMORIE PE PROMPT: ultimele 3 ture (user+assistant × 3) — ADĂUGAT
+      const hist = [];
+      const MAX_TURNS = 3;
+      function pushTurn(userText, assistantText){
+        hist.push({ role: "user", content: userText });
+        if (assistantText) hist.push({ role: "assistant", content: assistantText });
+        while (hist.length > MAX_TURNS * 2) hist.shift();
+      }
+
+      // --- UI helpers (original)
+      function addMessage(text, role='bot', returnNode=false){
+        const row = document.createElement('div');
+        row.className = role === 'user' ? 'text-right' : 'text-left';
+        const bubble = document.createElement('div');
+        bubble.className = 'inline-block max-w-[80%] rounded-2xl px-3 py-2 ' + (role==='user' ? 'bg-[var(--brand)] text-white' : 'bg-white border');
+        bubble.textContent = text;
+        row.appendChild(bubble);
+        messages.appendChild(row);
+        messages.scrollTop = messages.scrollHeight;
+        return returnNode ? bubble : null;
+      }
+
+      function mdLinksToHtml(md){
+        return md.split(/\]\(/).map((chunk, i) => {
+          if(i===0) return chunk;
+          const parts = chunk.split(")");
+          const href = parts[0];
+          const labelPart = md.split(/\]\(/)[i-1];
+          const label = labelPart.substring(labelPart.lastIndexOf("[")+1);
+          if(!/^https?:\/\//.test(href)) return label;
+          return `<a href="${href}" target="_blank" rel="noopener" class="underline decoration-[var(--brand)]">${label}</a>`;
+        }).join(' <span class="text-gray-400">|</span> ');
+      }
+
+      // autosize (original)
+      input.addEventListener('input', () => {
+        input.style.height = 'auto';
+        input.style.height = Math.min(input.scrollHeight, 220) + 'px';
+      });
+
+      // Enter = trimite, Shift+Enter = newline (original)
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          form.requestSubmit();
+        }
+      });
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const text = input.value.trim();
+        if(!text) return;
+
+        addMessage(text, 'user');
+        input.value=''; input.style.height='auto';
+
+        const thinking = addMessage('', 'bot', true); // pornește gol
+
+        // Heuristică spații (original)
+        const startsWithSpaceLetter = (s) => /^\s\p{L}/u.test(s);
+        const endsWithLetter = (s) => /\p{L}$/u.test(s);
+
+        const appendChunk = (chunk) => {
+          if (!chunk) return;
+          if (startsWithSpaceLetter(chunk) && endsWithLetter(thinking.textContent) && !thinking.textContent.endsWith(' ')) {
+            chunk = chunk.replace(/^\s/, '');
+          }
+          thinking.textContent += chunk;
+          messages.scrollTop = messages.scrollHeight;
+        };
+
+        const appendSource = (mdLine) => {
+          const clean = mdLine.replace(/^Sursă:\s*/,'').trim();
+          if (!clean) return;
+          const div = document.createElement('div');
+          div.className = 'mt-1 text-xs text-gray-600';
+          div.innerHTML = mdLinksToHtml(clean);
+          thinking.appendChild(div);
+        };
+
+        try {
+          // 1) Streaming SSE — TRIMITE ACUM ȘI HISTORY (ADĂUGAT)
+          const res = await fetch('/chat/stream', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              question: text,
+              session_id: SESSION_ID,
+              history: hist.slice() // ultimele 3 ture
+            })
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+          if (!res.body || !res.headers.get('content-type')?.includes('text/event-stream')) {
+            throw new Error('No stream; fallback');
+          }
+
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+
+          while (true) {
+            const {value, done} = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, {stream: true});
+
+            const parts = buffer.split('\n\n');
+            buffer = parts.pop();
+            for (const part of parts) {
+              const line = part.split('\n').find(l => l.startsWith('data:'));
+              if (!line) continue;
+              const payload = line.slice(5); // păstrează spațiile
+              if (!payload) continue;
+
+              if (/^\s*sursă:/i.test(payload)) {
+                appendSource(payload.trim());
+              } else if (payload.trim().toLowerCase() === 'ok') {
+                // final stream (original: fără acțiune)
+              } else {
+                appendChunk(payload);
+              }
+            }
+          }
+
+          // La finalul stream-ului avem textul complet în 'thinking.textContent' — SALVĂM TURA (ADĂUGAT)
+          pushTurn(text, thinking.textContent.trim());
+
+        } catch (err) {
+          // 2) Fallback JSON — TRIMITE ȘI HISTORY + SALVEAZĂ TURA (ADĂUGAT)
+          try {
+            const res2 = await fetch('/chat', {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({
+                question: text,
+                session_id: SESSION_ID,
+                history: hist.slice()
+              })
+            });
+            if (!res2.ok) throw new Error(`HTTP ${res2.status}`);
+            const data = await res2.json();
+            const answer = (data.answer || '');
+            const citations = (data.citations || '').trim();
+            thinking.textContent = answer;
+            if (citations) {
+              const div = document.createElement('div');
+              div.className = 'mt-1 text-xs text-gray-600';
+              div.innerHTML = mdLinksToHtml(citations);
+              thinking.appendChild(div);
+            }
+            // SALVĂM TURA (ADĂUGAT)
+            pushTurn(text, answer.trim());
+          } catch (err2) {
+            thinking.textContent = 'A apărut o eroare la apelul către server.';
+            console.error(err2);
+          }
+        }
+      });
+    });
+  </script>
+</body>
+</html>
