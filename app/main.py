@@ -56,7 +56,7 @@ CHROMA_PATH    = os.getenv("CHROMA_PATH", "app/chroma_db_bge_m3")
 COLLECTION     = os.getenv("COLLECTION_NAME")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 MODEL_NAME     = os.getenv("GEN_MODEL", "gpt-4o-mini")
-TOP_K          = int(os.getenv("TOP_K", "6"))
+TOP_K          = int(os.getenv("TOP_K", "8"))
 DISTANCE_MAX   = float(os.getenv("DISTANCE_MAX", "1.0"))
 MAX_WORDS      = int(os.getenv("MAX_WORDS", "120"))
 
@@ -133,8 +133,8 @@ def system_prompt() -> str:
     return (
         "Ești PublicAI, asistent al unei instituții publice.\n"
         "- Folosește EXCLUSIV fragmentele furnizate (RAG). Nu inventa.\n"
-        "- Ton politicos, clar. Max 100 de cuvinte.\n"
-        "- Structură: 1) răspuns direct în 1–2 fraze; 2) dacă e util, 1–3 puncte cheie.\n"
+        "- Ton politicos, optimist, clar. Max 120 de cuvinte.\n"
+        "- Structură: răspuns relevant si sintetizat în 1–2 fraze; .\n"
         "- Dacă informația nu există în fragmente, răspunde EXACT:\n"
         "  «Nu am găsit documente relevante în baza locală…PublicAI răspunde doar cu informații publice ale Primăriei Sector 2»\n"
        
@@ -183,7 +183,7 @@ def build_user_prompt(question: str, ctxs: List[Dict[str, Any]]) -> str:
     return (
         f"Întrebare: {question}\n\n"
         f"Fragmente (folosește DOAR acestea):\n{fragments_text}\n\n"
-        f"Instrucțiuni: răspuns direct + 1–3 puncte dacă e util; maxim 100 cuvinte; nu inventa."
+        f"Instrucțiuni: răspuns direct, relevant si sintetizat; maxim 120 cuvinte; nu inventa."
     )
 
 def retrieve(q: str) -> List[Dict[str, Any]]:
